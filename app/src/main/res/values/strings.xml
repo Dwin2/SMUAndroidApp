@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SMU Study App</string>
+    <string name="accessibility_service_label">SMU Study App Monitor</string>
+    <string name="accessibility_service_description">Required to detect when you open and close social media apps for the study. No app content is ever read or recorded.</string>
+</resources>

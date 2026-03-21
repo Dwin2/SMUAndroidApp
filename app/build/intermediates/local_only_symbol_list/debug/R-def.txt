@@ -1,0 +1,18 @@
+R_DEF: Internal format may change without notice
+local
+color background
+color error
+color primary
+color primary_variant
+color secondary
+color surface
+drawable ic_launcher_background
+drawable ic_launcher_foreground
+mipmap ic_launcher
+mipmap ic_launcher_round
+string accessibility_service_description
+string accessibility_service_label
+string app_name
+style Theme.SMUStudyApp
+style Theme.SMUStudyApp.Translucent
+xml accessibility_service_config
