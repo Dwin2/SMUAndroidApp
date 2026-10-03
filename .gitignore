@@ -17,3 +17,6 @@ local.properties
 
 # Built APKs
 *.apk
+
+# Firebase config (contains API key)
+google-services.json
