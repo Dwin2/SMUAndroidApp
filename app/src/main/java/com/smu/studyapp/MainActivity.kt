@@ -1,16 +1,14 @@
 package com.smu.studyapp
 
-import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -29,16 +27,8 @@ class MainActivity : ComponentActivity() {
 
     private val setupVm: SetupViewModel by viewModels()
 
-    private val notifPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* proceed regardless */ }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
 
         setContent {
             SMUStudyTheme {
@@ -53,37 +43,77 @@ class MainActivity : ComponentActivity() {
 
                     val startDestination = when {
                         participant?.setupComplete == true -> Routes.DASHBOARD
-                        participant?.baselineSurveyComplete == true -> Routes.TUTORIAL
-                        participant != null -> Routes.BASELINE_SURVEY
-                        else -> Routes.WELCOME
+                        participant?.studyGroup == "T" || participant?.studyGroup == "C" ->
+                            Routes.NOTIFICATIONS
+                        else -> Routes.PROLIFIC_ID
                     }
 
                     val navController = rememberNavController()
 
                     NavHost(navController = navController, startDestination = startDestination) {
-                        composable(Routes.WELCOME) {
-                            WelcomeScreen(onNext = { navController.navigate(Routes.DEMOGRAPHICS) })
-                        }
-                        composable(Routes.DEMOGRAPHICS) {
-                            DemographicsScreen { name, age, gender, code, wStart, wEnd ->
-                                setupVm.saveDemographics(name, age, gender, code, wStart, wEnd)
-                                navController.navigate(Routes.BASELINE_SURVEY)
-                            }
-                        }
-                        composable(Routes.BASELINE_SURVEY) {
-                            BaselineSurveyScreen { responses ->
-                                setupVm.saveBaselineSurvey(responses)
-                                navController.navigate(Routes.TUTORIAL) {
-                                    popUpTo(Routes.BASELINE_SURVEY) { inclusive = true }
+                        composable(Routes.PROLIFIC_ID) {
+                            val enrollState by setupVm.enrollState.collectAsState()
+                            LaunchedEffect(enrollState) {
+                                if (enrollState == SetupViewModel.EnrollState.Done) {
+                                    setupVm.resetEnrollState()
+                                    navController.navigate(Routes.NOTIFICATIONS) {
+                                        popUpTo(Routes.PROLIFIC_ID) { inclusive = true }
+                                    }
                                 }
                             }
+                            ProlificIdScreen(
+                                enrollState = enrollState,
+                                onConfirmed = { setupVm.enroll(it) },
+                                onDismissError = { setupVm.resetEnrollState() }
+                            )
                         }
-                        composable(Routes.TUTORIAL) {
-                            TutorialScreen(
-                            onSaveSelectedApps = { setupVm.saveSelectedApps(it) },
-                            onComplete = {
+                        composable(Routes.NOTIFICATIONS) {
+                            NotificationsScreen(onNext = {
+                                navController.navigate(Routes.SAMPLING_WINDOW)
+                            })
+                        }
+                        composable(Routes.SAMPLING_WINDOW) {
+                            SamplingWindowScreen(
+                                onNext = { startMin, endMin, selectedApps ->
+                                    setupVm.saveSamplingWindow(startMin, endMin, selectedApps)
+                                    navController.navigate(Routes.PERMISSIONS)
+                                }
+                            )
+                        }
+                        composable(Routes.PERMISSIONS) {
+                            PermissionsScreen(onNext = {
+                                navController.navigate(Routes.EXPECTATIONS)
+                            })
+                        }
+                        composable(Routes.EXPECTATIONS) {
+                            ExpectationsScreen(onNext = {
+                                navController.navigate(Routes.MOCK_PROMPT)
+                            })
+                        }
+                        composable(Routes.MOCK_PROMPT) {
+                            MockPromptScreen(
+                                studyGroup = participant?.studyGroup ?: "T",
+                                onNext = { navController.navigate(Routes.START_DATE) }
+                            )
+                        }
+                        composable(Routes.START_DATE) {
+                            StartDateScreen(
+                                windowStartMin = participant?.samplingWindowStartMin ?: (8 * 60),
+                                onNext = { navController.navigate(Routes.COMPLETION_CODE) }
+                            )
+                        }
+                        composable(Routes.COMPLETION_CODE) {
+                            CompletionCodeScreen(onGoDashboard = {
                                 setupVm.completeSetup()
-                                EMAScheduler.scheduleDaily(this@MainActivity)
+                                // EMAs are deferred so install day stays setup-only — they
+                                // begin firing on Day 1 (the participant's chosen window-
+                                // start tomorrow).
+                                val startMs = participant?.let {
+                                    com.smu.studyapp.utils.SamplingManager.computeStudyStartDate(
+                                        System.currentTimeMillis(), it.samplingWindowStartMin
+                                    )
+                                } ?: 0L
+                                EMAScheduler.scheduleDaily(this@MainActivity, startMs)
                                 startForegroundService(
                                     Intent(this@MainActivity, MonitorForegroundService::class.java)
                                 )
@@ -94,8 +124,6 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.DASHBOARD) {
                             DashboardScreen(onReset = {
-                                // Restart the activity so ViewModels are fresh
-                                // and routing re-evaluates from a clean DB
                                 finish()
                                 startActivity(intent)
                             })

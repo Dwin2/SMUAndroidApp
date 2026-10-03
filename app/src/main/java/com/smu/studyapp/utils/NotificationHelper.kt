@@ -12,6 +12,10 @@ object NotificationHelper {
     const val CHANNEL_EMA = "ema_surveys"
     const val CHANNEL_MONITOR = "monitor_service"
 
+    // Notification IDs (also reused by AlarmManager request codes for cancellation)
+    const val NOTIF_5PM = 1001
+    const val NOTIF_9PM = 1002
+
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -27,19 +31,35 @@ object NotificationHelper {
         )
     }
 
-    fun showEMANotification(context: Context, surveyType: String, notifId: Int) {
-        val label = if (surveyType == "EMA_5PM") "5 PM" else "9 PM"
+    fun showEMANotification(
+        context: Context,
+        surveyType: String,
+        notifId: Int,
+        triggerTimeMs: Long,
+        isFollowUp: Boolean = false
+    ) {
+        val title = "Time for your quick check-in!"
+        val text = if (isFollowUp) {
+            "Just a reminder — your study check-in is still waiting. It takes about a minute and closes soon!"
+        } else {
+            "It only takes a minute! Open the app to share how your day is going."
+        }
+
         val intent = Intent(context, EMAActivity::class.java).apply {
             putExtra("survey_type", surveyType)
+            putExtra("trigger_time_ms", triggerTimeMs)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val pi = PendingIntent.getActivity(context, notifId, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val pi = PendingIntent.getActivity(
+            context, notifId, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val notif = NotificationCompat.Builder(context, CHANNEL_EMA)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("SMU Study - $label Survey")
-            .setContentText("Please complete your daily well-being check-in.")
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pi)
@@ -47,5 +67,10 @@ object NotificationHelper {
 
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(notifId, notif)
+    }
+
+    fun cancelEMANotification(context: Context, notifId: Int) {
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .cancel(notifId)
     }
 }

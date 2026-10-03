@@ -26,4 +26,13 @@ interface AppSessionDao {
 
     @Query("SELECT MAX(openTime) FROM app_sessions WHERE promptShown = 1")
     suspend fun getLastPromptedSessionOpenTime(): Long?
+
+    @Query("SELECT * FROM app_sessions WHERE synced = 0 ORDER BY openTime ASC LIMIT :limit")
+    suspend fun getUnsynced(limit: Int = 500): List<AppSession>
+
+    @Query("UPDATE app_sessions SET synced = 1 WHERE sessionId IN (:sessionIds)")
+    suspend fun markSynced(sessionIds: List<String>)
+
+    @Query("SELECT COUNT(*) FROM app_sessions WHERE synced = 0")
+    suspend fun unsyncedCount(): Int
 }

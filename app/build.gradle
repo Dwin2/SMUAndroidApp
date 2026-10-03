@@ -4,6 +4,23 @@ plugins {
     id 'com.google.devtools.ksp'
 }
 
+def loadLocalProp(String key, String fallback) {
+    def f = rootProject.file('local.properties')
+    if (f.exists()) {
+        def p = new Properties()
+        f.withInputStream { p.load(it) }
+        def v = p.getProperty(key)
+        if (v != null && !v.isEmpty()) return v
+    }
+    return fallback
+}
+
+def releaseStoreFile = loadLocalProp('RELEASE_KEYSTORE_FILE', '')
+def releaseStorePassword = loadLocalProp('RELEASE_KEYSTORE_PASSWORD', '')
+def releaseKeyAlias = loadLocalProp('RELEASE_KEY_ALIAS', '')
+def releaseKeyPassword = loadLocalProp('RELEASE_KEY_PASSWORD', '')
+def hasReleaseSigning = releaseStoreFile && new File(releaseStoreFile).exists()
+
 android {
     namespace 'com.smu.studyapp'
     compileSdk 34
@@ -19,10 +36,25 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+
+        buildConfigField "String", "API_BASE_URL", "\"${loadLocalProp('STUDY_API_BASE_URL', '')}\""
+        buildConfigField "String", "STUDY_API_KEY", "\"${loadLocalProp('STUDY_API_KEY', '')}\""
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -36,6 +68,7 @@ android {
     }
     buildFeatures {
         compose true
+        buildConfig true
     }
     composeOptions {
         kotlinCompilerExtensionVersion '1.5.8'
@@ -78,6 +111,12 @@ dependencies {
 
     // Gson
     implementation 'com.google.code.gson:gson:2.10.1'
+
+    // Networking
+    implementation 'com.squareup.retrofit2:retrofit:2.11.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.11.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

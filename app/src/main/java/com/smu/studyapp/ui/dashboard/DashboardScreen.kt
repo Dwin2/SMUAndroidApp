@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,13 +34,18 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel(), onReset: () -> Unit = 
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset Study Data?") },
-            text = { Text("This will delete all study data and return to the setup screen. Use this for testing only.") },
+            title = { Text("Log out?") },
+            text = {
+                Text(
+                    "You'll be returned to the Prolific ID entry screen and the local copy of your data will be cleared. " +
+                    "Responses already uploaded to AWS are preserved."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showResetDialog = false
                     vm.resetStudy(onReset)
-                }) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Log out", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
@@ -58,6 +64,15 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel(), onReset: () -> Unit = 
                             onLongClick = { showResetDialog = true }
                         )
                     )
+                },
+                actions = {
+                    IconButton(onClick = { showResetDialog = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = "Log out",
+                            tint = Color.White
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -79,35 +94,42 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel(), onReset: () -> Unit = 
             item {
                 state.participant?.let { p ->
                     StudyStatusCard(
-                        name = p.name,
+                        prolificId = p.participantCode,
                         studyDay = state.studyDay,
-                        group = p.studyGroup,
-                        windowStart = p.samplingWindowStart,
-                        windowEnd = p.samplingWindowEnd
+                        windowStartMin = p.samplingWindowStartMin,
+                        windowEndMin = p.samplingWindowEndMin
                     )
                 }
             }
 
+            // Sync card
+            item { SyncCard() }
+
             // Today's stats
             item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                StatCard(
+                    label = "Prompts Today",
+                    value = "${state.todayPromptCount} / ${SamplingManager.MAX_PROMPTS_PER_DAY}",
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Daily-cap reassurance
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    StatCard(
-                        label = "Prompts Today",
-                        value = "${state.todayPromptCount} / ${SamplingManager.MAX_PROMPTS_PER_DAY}",
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        label = "Sessions Today",
-                        value = "${state.todaySessions.size}",
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        label = "Total Sessions",
-                        value = "${state.totalSessions}",
-                        modifier = Modifier.weight(1f)
+                    Text(
+                        "We respect your time and attention. You'll see no more than " +
+                            "${SamplingManager.MAX_PROMPTS_PER_DAY} prompts per day. " +
+                            "Once you hit that, the pop-ups pause until tomorrow.",
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(14.dp)
                     )
                 }
             }
@@ -170,16 +192,16 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel(), onReset: () -> Unit = 
 
 @Composable
 private fun StudyStatusCard(
-    name: String, studyDay: Int, group: String, windowStart: Int, windowEnd: Int
+    prolificId: String, studyDay: Int, windowStartMin: Int, windowEndMin: Int
 ) {
     val dayLabel = when {
-        studyDay == 0 -> "Day 0 – Baseline"
+        studyDay == 0 -> "Day 0 – Setup"
         studyDay in 1..7 -> "Day $studyDay of 7 – Study Active"
         studyDay == 8 -> "Day 8 – Endline"
         studyDay >= 30 -> "Day 30 – Follow-up"
         else -> "Day $studyDay"
     }
-    val groupLabel = if (group == "T") "Treatment" else "Control"
+    val idShort = if (prolificId.length >= 8) "…${prolificId.takeLast(6)}" else prolificId
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -187,13 +209,16 @@ private fun StudyStatusCard(
         elevation = CardDefaults.cardElevation(3.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Hello, $name!", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("SMU Study", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Prolific ID: $idShort", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.secondary)
+            Spacer(Modifier.height(6.dp))
             Text(dayLabel, fontSize = 15.sp, color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
+            val windowLabel = "${SamplingManager.formatTime12h(windowStartMin)} – ${SamplingManager.formatTime12h(windowEndMin)}"
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Group: $groupLabel")
-                Chip("Window: ${windowStart}:00–${windowEnd}:00")
+                Chip("Window: $windowLabel")
             }
         }
     }
@@ -211,6 +236,24 @@ private fun Chip(text: String) {
     ) {
         Text(text, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun SyncCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Cloud sync", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(
+                "Auto-syncs every 15 min and after each survey",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
     }
 }
 

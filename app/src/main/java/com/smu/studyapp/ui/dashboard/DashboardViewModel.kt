@@ -9,8 +9,10 @@ import com.smu.studyapp.data.entities.AppSession
 import com.smu.studyapp.data.entities.Participant
 import com.smu.studyapp.data.entities.SurveyResponse
 import com.smu.studyapp.utils.SamplingManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class DashboardUiState(
     val participant: Participant? = null,
@@ -23,6 +25,17 @@ data class DashboardUiState(
     val trackedAppNames: List<String> = emptyList()
 )
 
+private data class DashboardData(
+    val participant: Participant?,
+    val studyDay: Int,
+    val todaySessions: List<AppSession>,
+    val todayPromptCount: Int,
+    val totalSessions: Int,
+    val recentSessions: List<AppSession>,
+    val promptHistory: List<SurveyResponse>,
+    val trackedAppNames: List<String>
+)
+
 class DashboardViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = (app as MyApplication).repository
 
@@ -31,7 +44,9 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetStudy(onDone: () -> Unit) {
         viewModelScope.launch {
-            AppDatabase.getDatabase(getApplication()).clearAllTables()
+            withContext(Dispatchers.IO) {
+                AppDatabase.getDatabase(getApplication()).clearAllTables()
+            }
             onDone()
         }
     }
@@ -44,7 +59,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                 repo.getAllResponses()
             ) { participant, allSessions, allResponses ->
                 val day = participant?.let {
-                    SamplingManager.getCurrentStudyDay(it.enrollmentDate)
+                    SamplingManager.getCurrentStudyDay(it)
                 } ?: 0
 
                 val todaySessions = allSessions.filter { it.studyDay == day }
@@ -53,15 +68,23 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                     .filter { it.surveyType in listOf("MRP", "NP", "SATISFACTION") }
                     .sortedByDescending { it.timestamp }
                     .take(50)
-                // Opening prompts sent (regardless of answered) + satisfaction surveys shown
-                val openingPrompts = todaySessions.count { it.promptShown }
-                val closingPrompts = allResponses.count { it.surveyType == "SATISFACTION" && it.studyDay == day }
-                val todayPromptCount = openingPrompts + closingPrompts
+                // Only OPEN prompts count toward the 15/day cap (close prompts are
+                // separate). Skips count too, but capped at MAX_SKIPS_COUNTED_PER_DAY.
+                val todayOpenResponses = allResponses.filter {
+                    it.studyDay == day && it.surveyType in listOf("MRP", "NP")
+                }
+                val todaySkipsLogged = todayOpenResponses.count {
+                    it.responseJson.contains("\"skipped\":true")
+                }
+                val countedSkips = minOf(todaySkipsLogged, SamplingManager.MAX_SKIPS_COUNTED_PER_DAY)
+                val answeredOpens = todayOpenResponses.size - todaySkipsLogged
+                val todayPromptCount = (answeredOpens + countedSkips)
+                    .coerceAtMost(SamplingManager.MAX_PROMPTS_PER_DAY)
                 val trackedAppNames = SamplingManager.getSelectedAppNames(
                     participant?.selectedApps ?: ""
                 )
 
-                DashboardUiState(
+                DashboardData(
                     participant = participant,
                     studyDay = day,
                     todaySessions = todaySessions,
@@ -71,7 +94,18 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                     promptHistory = promptHistory,
                     trackedAppNames = trackedAppNames
                 )
-            }.collect { _uiState.value = it }
+            }.collect { d ->
+                _uiState.value = _uiState.value.copy(
+                    participant = d.participant,
+                    studyDay = d.studyDay,
+                    todaySessions = d.todaySessions,
+                    todayPromptCount = d.todayPromptCount,
+                    totalSessions = d.totalSessions,
+                    recentSessions = d.recentSessions,
+                    promptHistory = d.promptHistory,
+                    trackedAppNames = d.trackedAppNames
+                )
+            }
         }
     }
 }

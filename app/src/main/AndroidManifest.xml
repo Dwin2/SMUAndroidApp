@@ -1,16 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"
-        xmlns:tools="http://schemas.android.com/tools"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Android 11+ package-visibility declarations. We probe these via PackageManager
+         during setup so we can auto-track every social-media / messaging / AI app the
+         participant actually has installed. -->
+    <queries>
+        <!-- Needed so AppMonitorService can tell real apps (and the home screen) apart from
+             keyboards / SystemUI. Without these, Android 11+ hides every non-listed package,
+             so leaving Instagram for the launcher was ignored and no new session ever opened. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <!-- Video-based social media -->
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.snapchat.android" />
+        <package android:name="tv.twitch.android.app" />
+        <package android:name="com.bereal.ft" />
+        <!-- Text / photo / mixed social -->
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.zhiliaoapp.threads" />
+        <package android:name="com.instagram.threadsapp" />
+        <package android:name="com.reddit.frontpage" />
+        <package android:name="com.bluesky.app" />
+        <package android:name="bsky.app" />
+        <package android:name="org.joinmastodon.android" />
+        <package android:name="com.tumblr" />
+        <package android:name="com.pinterest" />
+        <package android:name="com.linkedin.android" />
+        <package android:name="com.discord" />
+        <package android:name="com.quora.android" />
+        <!-- Messaging -->
+        <package android:name="com.whatsapp" />
+        <package android:name="org.telegram.messenger" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="org.thoughtcrime.securesms" />
+        <package android:name="com.tencent.mm" />
+        <!-- AI chatbots / companions -->
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.microsoft.copilot" />
+        <package android:name="ai.perplexity.app.android" />
+        <package android:name="com.facebook.meta.ai" />
+        <package android:name="com.xai.grok" />
+        <package android:name="ai.character.app" />
+        <package android:name="ai.replika.app" />
+        <package android:name="com.inflection.pi" />
+        <package android:name="ai.nomi" />
+        <package android:name="ai.chai" />
+        <package android:name="ai.anima" />
+        <package android:name="com.deepseek.chat" />
+    </queries>
 
     <application
         android:name=".MyApplication"
@@ -30,14 +90,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Overlay activity for prompts shown over social media apps -->
-        <activity
-            android:name=".ui.prompts.PromptActivity"
-            android:exported="false"
-            android:launchMode="singleInstance"
-            android:theme="@style/Theme.SMUStudyApp.Translucent"
-            android:excludeFromRecents="true" />
 
         <!-- EMA survey activity for scheduled prompts -->
         <activity
@@ -59,11 +111,17 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Foreground service for app monitoring -->
+        <!-- Foreground service for app monitoring.
+             Android 14 (API 34) requires a PROPERTY_SPECIAL_USE_FGS_SUBTYPE explanation
+             when foregroundServiceType="specialUse". -->
         <service
             android:name=".service.MonitorForegroundService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the SMU social-media-use research study's accessibility service alive for the 7-day study window so in-the-moment EMA prompts can fire when participants open selected social media apps." />
+        </service>
 
         <!-- Boot receiver to reschedule alarms -->
         <receiver

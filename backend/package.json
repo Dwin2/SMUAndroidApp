@@ -1,0 +1,23 @@
+{
+  "name": "smu-study-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS serverless backend for SMU 7-day RCT study app",
+  "scripts": {
+    "build": "sam build",
+    "deploy": "sam deploy",
+    "deploy:guided": "sam deploy --guided",
+    "logs:sync": "sam logs --stack-name smu-study-backend --name SyncFunction --tail"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.665.0",
+    "@aws-sdk/lib-dynamodb": "^3.665.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^20.14.10",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.3"
+  }
+}

@@ -1,0 +1,244 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SMU Study App backend - API Gateway + Lambda (TS) + DynamoDB
+
+Parameters:
+  StudyApiKey:
+    Type: String
+    NoEcho: true
+    Description: Shared secret. The Android app sends this in the x-api-key header.
+    MinLength: 16
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, test]
+    Description: >-
+      prod uses the real tables. test creates separate -test tables so the enrollment
+      concurrency tests never consume real allocation slots. Deploy test as its own stack.
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref StudyDataTable
+        ALLOCATION_TABLE_NAME: !Ref AllocationTable
+        ASSIGNMENT_LOG_TABLE_NAME: !Ref AssignmentLogTable
+        STUDY_API_KEY: !Ref StudyApiKey
+
+Resources:
+  # Retain on every table: a stack rollback/delete must never drop study data, and PITR does
+  # not survive table deletion.
+  StudyDataTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !If [IsProd, smu-study-data, smu-study-data-test]
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # The 700-slot permuted-block allocation list. Loaded once by scripts/load_allocation.sh;
+  # slots are only ever claimed (claimed_by_pid / claimed_at set), never reset or deleted.
+  AllocationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !If [IsProd, smu-study-allocation, smu-study-allocation-test]
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: slot_index
+          AttributeType: N
+      KeySchema:
+        - AttributeName: slot_index
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # Append-only assignment log (event = assign | burn). The API only has PutItem on it, with
+  # attribute_not_exists guards, so entries are never updated or deleted.
+  AssignmentLogTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !If [IsProd, smu-study-assignment-log, smu-study-assignment-log-test]
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # Off-database copy of the allocation + assignment log (daily PITR exports).
+  AllocationBackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AllocationBackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/backupAllocation.handler
+      CodeUri: ./
+      Environment:
+        Variables:
+          BACKUP_BUCKET: !Ref AllocationBackupBucket
+          ALLOCATION_TABLE_ARN: !GetAtt AllocationTable.Arn
+          ASSIGNMENT_LOG_TABLE_ARN: !GetAtt AssignmentLogTable.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:ExportTableToPointInTime
+              Resource:
+                - !GetAtt AllocationTable.Arn
+                - !GetAtt AssignmentLogTable.Arn
+            - Effect: Allow
+              Action: [s3:PutObject, s3:AbortMultipartUpload, s3:PutObjectAcl]
+              Resource: !Sub "${AllocationBackupBucket.Arn}/*"
+      Events:
+        Daily:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: cjs
+        Target: node22
+        Minify: false
+        Sourcemap: true
+        EntryPoints: [src/handlers/backupAllocation.ts]
+
+  StudyApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders: ["content-type", "x-api-key"]
+        AllowMethods: ["GET", "POST", "OPTIONS"]
+
+  RegisterParticipantFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/registerParticipant.handler
+      CodeUri: ./
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StudyDataTable
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt AllocationTable.Arn
+            # Log is append-only: PutItem only, no Update/Delete.
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt AssignmentLogTable.Arn
+      Events:
+        Post:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref StudyApi
+            Path: /v1/participants
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: cjs
+        Target: node22
+        Minify: false
+        Sourcemap: true
+        EntryPoints: [src/handlers/registerParticipant.ts]
+
+  SyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/sync.handler
+      CodeUri: ./
+      Timeout: 30
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StudyDataTable
+      Events:
+        Post:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref StudyApi
+            Path: /v1/sync
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: cjs
+        Target: node22
+        Minify: false
+        Sourcemap: true
+        EntryPoints: [src/handlers/sync.ts]
+
+  ExportParticipantFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/exportParticipant.handler
+      CodeUri: ./
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref StudyDataTable
+      Events:
+        Get:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref StudyApi
+            Path: /v1/participants/{prolificId}/export
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: cjs
+        Target: node22
+        Minify: false
+        Sourcemap: true
+        EntryPoints: [src/handlers/exportParticipant.ts]
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the SMU Study API
+    Value: !Sub "https://${StudyApi}.execute-api.${AWS::Region}.amazonaws.com"
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref StudyDataTable
+  AllocationTableName:
+    Value: !Ref AllocationTable
+  AssignmentLogTableName:
+    Value: !Ref AssignmentLogTable
+  AllocationBackupBucketName:
+    Value: !Ref AllocationBackupBucket

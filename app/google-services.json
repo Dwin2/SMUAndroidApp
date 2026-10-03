@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "724969077123",
+    "project_id": "smu-study",
+    "storage_bucket": "smu-study.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:724969077123:android:aefd3a99e5921c44e3deb6",
+        "android_client_info": {
+          "package_name": "com.smu.studyapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaEz7PXa_WWAOWN5gopmt0rf2Pizfh9Oc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

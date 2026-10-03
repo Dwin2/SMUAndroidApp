@@ -11,7 +11,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.smu.studyapp.utils.NudgeManager
 import com.smu.studyapp.utils.SamplingManager
+
+// Nudge-mode notes, shown above the standard MRP/NP question (additive — they don't replace
+// the standard preamble). Days 1–3 are warmer/longer while participants learn the system.
+private const val NUDGE_NOTE_DAYS_1_3 =
+    "We'd love to hear about your experience. Just a sentence or two makes a real difference, " +
+        "and we'll send at most 15 prompts a day. If now isn't the right moment, tap Skip for now " +
+        "and the app will open as usual."
+private const val NUDGE_NOTE_DAYS_4_7 =
+    "Your response matters to us. If now isn't the right moment, tap Skip for now and the app " +
+        "will open as usual. Otherwise, thanks for taking a moment."
 
 @Composable
 fun PromptScreen(
@@ -19,7 +30,10 @@ fun PromptScreen(
     appPackage: String,
     promptType: String,
     vm: PromptViewModel,
-    onDismiss: () -> Unit
+    onSubmitDone: () -> Unit,
+    onSkip: () -> Unit,
+    mode: String = NudgeManager.MODE_STANDARD,
+    studyDay: Int = 1
 ) {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -33,91 +47,81 @@ fun PromptScreen(
             elevation = CardDefaults.cardElevation(12.dp)
         ) {
             when (promptType) {
-                "T" -> MRPContent(appPackage, vm, onDismiss)
-                "C" -> NeutralPromptContent(appPackage, vm, onDismiss)
-                "SATISFACTION" -> SatisfactionContent(appPackage, vm, onDismiss)
+                "T" -> MRPContent(appPackage, vm, onSubmitDone, onSkip, mode, studyDay)
+                "C" -> NeutralPromptContent(vm, onSubmitDone, onSkip, mode, studyDay)
+                "SATISFACTION" -> SatisfactionContent(appPackage, vm, onSubmitDone, onSkip)
             }
         }
     }
 }
 
+/** Warm note rendered above the question when the prompt is in nudge mode. */
 @Composable
-private fun MRPContent(appPackage: String, vm: PromptViewModel, onDismiss: () -> Unit) {
+private fun NudgeNote(studyDay: Int) {
+    val note = if (studyDay <= 3) NUDGE_NOTE_DAYS_1_3 else NUDGE_NOTE_DAYS_4_7
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            note,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.padding(12.dp)
+        )
+    }
+    Spacer(Modifier.height(16.dp))
+}
+
+private fun skipLabel(mode: String) =
+    if (mode == NudgeManager.MODE_NUDGE) "Skip for now" else "Skip"
+
+@Composable
+private fun MRPContent(
+    appPackage: String,
+    vm: PromptViewModel,
+    onSubmitDone: () -> Unit,
+    onSkip: () -> Unit,
+    mode: String,
+    studyDay: Int
+) {
     var text by remember { mutableStateOf("") }
     val appName = SamplingManager.getAppName(appPackage)
 
     Column(Modifier.padding(24.dp)) {
-        Text("Before you continue…", fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
+        if (mode == NudgeManager.MODE_NUDGE) NudgeNote(studyDay)
         Text(
-            "People use social media for different reasons at different moments. Right now, what are you hoping to do by using $appName?",
-            fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp
-        )
-        Text(
-            "This is not about changing or limiting your use. It is just a brief moment of reflection.",
-            fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.padding(top = 6.dp)
+            "People use it to achieve many different goals.",
+            fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary, lineHeight = 18.sp
         )
         Spacer(Modifier.height(16.dp))
-        OutlinedTextField(
-            value = text, onValueChange = { text = it },
-            label = { Text("Your motivation…") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(100.dp),
-            maxLines = 4
+        Text(
+            "In a sentence or two, what are you hoping to do on $appName right now?",
+            fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp
         )
-        Spacer(Modifier.height(20.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                Text("Skip")
-            }
-            Button(
-                onClick = { vm.submitMRP(text) { onDismiss() } },
-                enabled = text.isNotBlank(),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Submit")
-            }
-        }
-    }
-}
-
-private val neutralQuestions = listOf(
-    "What is one object you can see in front of you right now?",
-    "What is one object you can see near you right now?",
-    "Where are you sitting or standing right now?",
-    "What colors are most noticeable around you right now?",
-    "What object do your eyes naturally fall on right now?"
-)
-
-@Composable
-private fun NeutralPromptContent(appPackage: String, vm: PromptViewModel, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf("") }
-    val question = remember { neutralQuestions.random() }
-
-    Column(Modifier.padding(24.dp)) {
-        Text("Take a moment to notice your surroundings.",
-            fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
         Spacer(Modifier.height(8.dp))
-        Text(question, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp)
+        Text(
+            "Note: We're not asking you to limit your use. Just to take a moment to reflect on your intention.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, lineHeight = 16.sp
+        )
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(
             value = text, onValueChange = { text = it },
             label = { Text("Your answer…") },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp),
+                .height(110.dp),
             maxLines = 4
         )
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                Text("Skip")
+            OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f)) {
+                Text(skipLabel(mode))
             }
             Button(
-                onClick = { vm.submitNP(text, question) { onDismiss() } },
+                onClick = { vm.submitMRP(text) { onSubmitDone() } },
                 enabled = text.isNotBlank(),
                 modifier = Modifier.weight(1f)
             ) {
@@ -128,7 +132,54 @@ private fun NeutralPromptContent(appPackage: String, vm: PromptViewModel, onDism
 }
 
 @Composable
-private fun SatisfactionContent(appPackage: String, vm: PromptViewModel, onDismiss: () -> Unit) {
+private fun NeutralPromptContent(
+    vm: PromptViewModel,
+    onSubmitDone: () -> Unit,
+    onSkip: () -> Unit,
+    mode: String,
+    studyDay: Int
+) {
+    var text by remember { mutableStateOf("") }
+    val question = "Take a moment to look at your surroundings. In a sentence or two, describe one object or detail that catches your eye right now."
+
+    Column(Modifier.padding(24.dp)) {
+        if (mode == NudgeManager.MODE_NUDGE) NudgeNote(studyDay)
+        Text(
+            question,
+            fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp
+        )
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = text, onValueChange = { text = it },
+            label = { Text("Your answer…") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(110.dp),
+            maxLines = 4
+        )
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f)) {
+                Text(skipLabel(mode))
+            }
+            Button(
+                onClick = { vm.submitNP(text, question) { onSubmitDone() } },
+                enabled = text.isNotBlank(),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Submit")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SatisfactionContent(
+    appPackage: String,
+    vm: PromptViewModel,
+    onSubmitDone: () -> Unit,
+    onSkip: () -> Unit
+) {
     var selected by remember { mutableStateOf<String?>(null) }
     val appName = SamplingManager.getAppName(appPackage)
     val options = listOf("Not satisfied", "Neutral", "Satisfied")
@@ -156,17 +207,12 @@ private fun SatisfactionContent(appPackage: String, vm: PromptViewModel, onDismi
             }
         }
         Spacer(Modifier.height(20.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                Text("Skip")
-            }
-            Button(
-                onClick = { vm.submitSatisfaction(selected!!) { onDismiss() } },
-                enabled = selected != null,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Submit")
-            }
+        Button(
+            onClick = { vm.submitSatisfaction(selected!!) { onSubmitDone() } },
+            enabled = selected != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Submit")
         }
     }
 }

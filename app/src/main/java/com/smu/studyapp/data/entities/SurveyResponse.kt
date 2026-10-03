@@ -12,5 +12,6 @@ data class SurveyResponse(
     val sessionId: String = "",  // links open prompt to close satisfaction
     val studyDay: Int,
     val timestamp: Long = System.currentTimeMillis(),
-    val responseJson: String     // JSON blob of question -> answer pairs
+    val responseJson: String,    // JSON blob of question -> answer pairs
+    val synced: Boolean = false  // true once successfully uploaded to AWS
 )

@@ -13,7 +13,7 @@ import com.smu.studyapp.data.entities.SurveyResponse
 
 @Database(
     entities = [Participant::class, SurveyResponse::class, AppSession::class],
-    version = 2,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

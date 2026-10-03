@@ -15,5 +15,6 @@ data class AppSession(
     val promptShown: Boolean = false,   // whether MRP/NP was shown at open
     val promptType: String = "",        // "MRP" or "NP" or ""
     val satisfactionAnswered: Boolean = false,
-    val withinSamplingWindow: Boolean = true
+    val withinSamplingWindow: Boolean = true,
+    val synced: Boolean = false   // true once successfully uploaded to AWS
 )

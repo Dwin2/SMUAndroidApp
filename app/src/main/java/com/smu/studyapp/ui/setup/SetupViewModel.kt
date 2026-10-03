@@ -5,7 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.smu.studyapp.MyApplication
 import com.smu.studyapp.data.entities.Participant
-import com.smu.studyapp.data.entities.SurveyResponse
+import com.smu.studyapp.network.SyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -16,7 +16,6 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
     private val _participant = MutableStateFlow<Participant?>(null)
     val participant: StateFlow<Participant?> = _participant
 
-    // False until the first DB emission arrives — prevents premature routing
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded
 
@@ -29,63 +28,72 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun saveDemographics(
-        name: String,
-        age: Int,
-        gender: String,
-        participantCode: String,
-        windowStart: Int,
-        windowEnd: Int
-    ) {
+    sealed class EnrollState {
+        object Idle : EnrollState()
+        object Loading : EnrollState()
+        object Done : EnrollState()
+        data class Error(val message: String) : EnrollState()
+    }
+
+    private val _enrollState = MutableStateFlow<EnrollState>(EnrollState.Idle)
+    val enrollState: StateFlow<EnrollState> = _enrollState
+
+    /**
+     * Enrolls the Prolific ID with the backend, which assigns the condition from the allocation
+     * list. The participant row is only saved once a condition comes back, so setup can't
+     * continue unassigned. The condition is never shown on screen.
+     */
+    fun enroll(prolificId: String) {
+        if (_enrollState.value == EnrollState.Loading) return
+        _enrollState.value = EnrollState.Loading
         viewModelScope.launch {
-            val existing = repo.getParticipant()
-            val p = (existing ?: Participant()).copy(
-                name = name,
-                age = age,
-                gender = gender,
-                participantCode = participantCode,
-                samplingWindowStart = windowStart,
-                samplingWindowEnd = windowEnd
-            )
-            repo.saveParticipant(p)
+            when (val r = SyncManager(repo).enroll(prolificId)) {
+                is SyncManager.EnrollResult.Assigned -> {
+                    val existing = repo.getParticipant()
+                    repo.saveParticipant(
+                        (existing ?: Participant()).copy(
+                            participantCode = prolificId,
+                            studyGroup = r.studyGroup
+                        )
+                    )
+                    _enrollState.value = EnrollState.Done
+                }
+                is SyncManager.EnrollResult.Failed ->
+                    _enrollState.value = EnrollState.Error(r.message)
+            }
         }
     }
 
-    fun saveSelectedApps(packages: List<String>) {
+    fun resetEnrollState() {
+        _enrollState.value = EnrollState.Idle
+    }
+
+    fun saveSamplingWindow(startMin: Int, endMin: Int, selectedApps: List<String>) {
         viewModelScope.launch {
-            val participant = repo.getParticipant() ?: return@launch
-            val json = com.google.gson.Gson().toJson(packages)
-            repo.updateParticipant(participant.copy(selectedApps = json))
+            val existing = repo.getParticipant() ?: return@launch
+            val json = com.google.gson.Gson().toJson(selectedApps)
+            repo.updateParticipant(
+                existing.copy(
+                    samplingWindowStartMin = startMin,
+                    samplingWindowEndMin = endMin,
+                    selectedApps = json
+                )
+            )
         }
     }
 
     fun completeSetup() {
         viewModelScope.launch {
             val participant = repo.getParticipant() ?: return@launch
+            val now = System.currentTimeMillis()
+            val studyStart = com.smu.studyapp.utils.SamplingManager.computeStudyStartDate(
+                now, participant.samplingWindowStartMin
+            )
             repo.updateParticipant(
                 participant.copy(
                     setupComplete = true,
-                    enrollmentDate = System.currentTimeMillis()
-                )
-            )
-        }
-    }
-
-    fun saveBaselineSurvey(responses: Map<String, String>) {
-        viewModelScope.launch {
-            val participant = repo.getParticipant() ?: return@launch
-            val json = com.google.gson.Gson().toJson(responses)
-            repo.saveSurveyResponse(
-                SurveyResponse(
-                    participantCode = participant.participantCode,
-                    surveyType = "BASELINE",
-                    studyDay = 0,
-                    responseJson = json
-                )
-            )
-            repo.updateParticipant(
-                participant.copy(
-                    baselineSurveyComplete = true
+                    enrollmentDate = now,
+                    studyStartDate = studyStart
                 )
             )
         }
